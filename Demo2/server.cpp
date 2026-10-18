@@ -13,6 +13,13 @@
 
 using namespace std;
 
+struct VirtualNode{
+    char nodeID;
+    int clientSock;
+    in_addr ipAddr; //////////////////////////
+    int udpPort;
+};
+
 int main(int argc, char* argv[]) {
     if(argc!=2){
         cout<< "Usage is ./ON <configfile>\n";
@@ -20,12 +27,17 @@ int main(int argc, char* argv[]) {
     }
 
     // Parsing the config file
+    // Need to add more validating the config file rules
 
-    int N;
+    int N = -1;
     vector<vector<int>> costs;
     int temp = 1;
 
     ifstream fin(argv[1]);
+    if(!fin.is_open()){
+        perror("config file didnt open");
+        return 1;
+    }
 
     string line;
     while(getline(fin,line)){
@@ -42,6 +54,10 @@ int main(int argc, char* argv[]) {
             }
         }
         else{
+            if(N==-1){
+                perror("N was not parsed yet but adjaceny row is parsed");
+                return 1;
+            }
             istringstream iss(line);
             int x;
             int row = temp -1;
@@ -53,48 +69,60 @@ int main(int argc, char* argv[]) {
             }
             temp++;
         }
-
-        int serverSock = socket(AF_INET, SOCK_STREAM, 0);
-        if(serverSock < 0){
-            perror("socket creation error");
-            return 1;
-        }
-
-
-        sockaddr_in serverAddr{};
-        serverAddr.sin_family = AF_INET;
-        serverAddr.sin_port = htons(5000);
-
-        inet_pton(AF_INET, <IPADDR>, &serverAddr.sin_addr); ///////////
-
-        if(bind(serverSock, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0){
-            perror("bind");
-            close(serverSock);
-            return 1;
-        };
-
-        if(listen(serverSock, 27) < 0){
-            perror("listen function error");
-            close(serverSock);
-            return 1;
-        };
-
-        vector<int> clientSocks;
-        int i=0;
-        while(i<N){
-            sockaddr_in clientAddr{};
-            socklen_t clientLen = sizeof(clientAddr);
-
-            int clientSock = accept(serverSock,(struct sockaddr*)&clientAddr,&clientLen);
-            if(clientSock < 0){
-                perror("Accept error");
-                
-            }
-
-            i++;
-
-        }
-
     }
+
+    int serverSock = socket(AF_INET, SOCK_STREAM, 0);
+    if(serverSock < 0){
+        perror("socket creation error");
+        return 1;
+    }
+
+
+    sockaddr_in serverAddr{};
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(5000);
+
+    if(inet_pton(AF_INET, 172.18.128.3, &serverAddr.sin_addr) != 1){
+        perror("inet_pton error");
+        close(serverSock);
+        return 1;
+    }; ///////////
+
+    if(bind(serverSock, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0){
+        perror("bind");
+        close(serverSock);
+        return 1;
+    };
+
+    if(listen(serverSock, 27) < 0){
+        perror("listen function error");
+        close(serverSock);
+        return 1;
+    };
+
+    vector<VirtualNode> clientSocks;
+    int i=0;
+    if(N==-1){
+        perror("N is not parsed");
+        return 1;
+    }
+    while(i<N){
+        sockaddr_in clientAddr{};
+        socklen_t clientLen = sizeof(clientAddr);
+
+        int clientSock = accept(serverSock,(struct sockaddr*)&clientAddr,&clientLen);
+        if(clientSock < 0){
+            perror("Accept error");
+            // continue;
+            close(serverSock);
+            return 1;
+        }
+        else{
+            recv()
+            clientSocks.push_back(clientSock);
+            i++;
+        }
+    }
+    
     return 0;
 }
