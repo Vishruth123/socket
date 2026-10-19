@@ -236,6 +236,19 @@ int main(int argc, char* argv[]) {
         cerr << "Invalid UDP Port\n"; return 1;
     }
 
+    in_addr onIP{}, myIP{};
+
+    if (inet_pton(AF_INET, argv[1], &onIP) != 1 || inet_pton(AF_INET, argv[2], &myIP) != 1) {
+        cerr << "Invalid IPv4 address\n"; return 1;
+    }
+
+    unsigned int onHost = ntohl(onIP.s_addr);
+    unsigned int myHost = ntohl(myIP.s_addr);
+
+    if (onHost == 0 || myHost == 0 || (onHost >> 24) == 127 || (myHost >> 24) == 127) {
+        cerr << "loopback/unspecified IPv4 address provided\n"; return 1;
+    }
+
     int udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
 
     if (udpSocket < 0) {
@@ -245,7 +258,7 @@ int main(int argc, char* argv[]) {
     sockaddr_in myUDPAddress{};
     myUDPAddress.sin_family = AF_INET;
     myUDPAddress.sin_port = htons(udpPort);
-    inet_pton(AF_INET, argv[2], &myUDPAddress.sin_addr);
+    myUDPAddress.sin_addr = myIP;
 
     if (bind(udpSocket, (sockaddr*)&myUDPAddress, sizeof(myUDPAddress)) < 0)
         return 1;
@@ -259,13 +272,13 @@ int main(int argc, char* argv[]) {
     sockaddr_in oracleAddress{};
     oracleAddress.sin_family = AF_INET;
     oracleAddress.sin_port = htons(5000);
-    inet_pton(AF_INET, argv[1], &oracleAddress.sin_addr);
+    oracleAddress.sin_addr = onIP;
 
     if (connect(tcpSocket, (sockaddr*)&oracleAddress, sizeof(oracleAddress)) < 0)
         return 1;
 
     char message[6];
-    inet_pton(AF_INET, argv[2], message);
+    memcpy(message, &myIP.s_addr, 4);
 
     unsigned short networkPort = htons(udpPort);
     memcpy(message + 4, &networkPort, 2);
@@ -296,6 +309,8 @@ int main(int argc, char* argv[]) {
         fd_set readSet;
         FD_ZERO(&readSet);
         FD_SET(tcpSocket, &readSet);
+
+        if (myID != '?')
         FD_SET(udpSocket, &readSet);
 
         int maxSocket = (tcpSocket > udpSocket) ? tcpSocket : udpSocket;
@@ -319,7 +334,7 @@ int main(int argc, char* argv[]) {
             break;
         }
 
-        if (FD_ISSET(tcpSocket, &readSet)) {
+        if (ready > 0 && FD_ISSET(tcpSocket, &readSet)) {
             if (!handleLinkStateMessage(tcpSocket, myID, neighbours, neighbourCount, graph, known))
             break;
             if (!sendOwnLSP(udpSocket, myID, neighbours, neighbourCount, sequenceNumber)) break;
@@ -327,7 +342,7 @@ int main(int argc, char* argv[]) {
             lastPeriodic = time(nullptr);
         }
 
-        if (FD_ISSET(udpSocket, &readSet)) {
+        if (ready > 0 && FD_ISSET(udpSocket, &readSet)) {
             handleReceivedLSP(udpSocket, myID, neighbours, neighbourCount, graph, known, lastSequence);
         }
 
