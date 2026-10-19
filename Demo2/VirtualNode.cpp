@@ -170,7 +170,7 @@ void handleReceivedLSP(int udpSocket, char myID, int graph[26][26], bool known[2
     sockaddr_in sender{};
     socklen_t senderLength = sizeof(sender);
 
-    int length = recvfrom(udpSocket, message, size(message), 0, (sockaddr*)&sender, &senderLength);
+    int length = recvfrom(udpSocket, message, sizeof(message), 0, (sockaddr*)&sender, &senderLength);
 
     if (length < 6) return;
 
