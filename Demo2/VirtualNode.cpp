@@ -143,6 +143,7 @@ bool sendOwnLSP(int udpSocket, char myID, const Neighbour neighbours[], int neig
 
     for (int i = 0; i < neighbourCount; i++) {
         message[position] = neighbours [i].id;
+        position++;
 
         unsigned int networkCost = htonl(neighbours[i].cost);
         memcpy(message + position, & networkCost, 4); position +=4;
@@ -224,7 +225,9 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    while (handleLinkStateMessage(tcpSocket, myID, neighbours, neighbourCount, graph, known)) {}
+    while (handleLinkStateMessage(tcpSocket, myID, neighbours, neighbourCount, graph, known)) {
+        if (!sendOwnLSP(udpSocket, myID, neighbours, neighbourCount, sequenceNumber)) break;
+    }
 
     close(tcpSocket);
     close(udpSocket);
