@@ -20,6 +20,49 @@ struct VirtualNode{
     int udpPort;
 };
 
+bool recmsg(int sock, void* buffer, int length){
+    char*p = (char*)buffer;
+    int received = 0;
+
+    while(received < length) {
+        int n = recv(sock, p+received , length - received, 0);
+        if(n<=0) return false;
+        received += n;
+    }
+    return true;
+}
+
+bool sendcompletemsg(int sock, const void* buffer, int length) {
+    const char* p = (char*)buffer;
+    int sent = 0;
+
+    while(sent<length){
+        int n = send(sock, p+sent, length - sent, 0);
+        if(n<=0) return false;
+        sent += n;
+    }
+    return true;
+}
+
+void msgtuple(vector<unsigned char>& body,const VirtualNode& node,int cost){
+    body.push_back(node.nodeID);
+    unsigned char* ip = (unsigned char*)&node.ipAddr.s_addr;
+    for(int i=0;i<4;i++){
+        body.push_back(ip[i]);
+    }
+    unsigned short port = node.udpPort;
+
+    body.push_back((port >> 8) & 0xFF);
+    body.push_back(port & 0xFF);
+
+    uint32_t tcost = cost;
+    body.push_back((tcost >> 24) & 0xFF);
+    body.push_back((tcost >> 16) & 0xFF);
+    body.push_back((tcost >> 8) & 0xFF);
+    body.push_back(tcost & 0xFF);
+    
+}
+
 int main(int argc, char* argv[]) {
     if(argc!=2){
         cout<< "Usage is ./ON <configfile>\n";
@@ -39,35 +82,36 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    vector<vector<int>> rows;
     string line;
-    while(getline(fin,line)){
-        if(line.empty()) continue; 
-        else if(line[0] == '#') continue; // skipping the comment lines
-        else if(line[0] == 'N'){ // N = <value>
-            char ch;
-            istringstream iss(line);
-            iss >> ch >> ch >> N;
 
-            costs.assign(N,vector<int>(N,-1));
-            for(int i=0;i<N;i++){
-                costs[i][i] = 0;
-            }
+    while(getline(fin,line)){
+        size_t first = line.find_first_not_of(" \t\r\n");
+        if(first == string::npos) continue;
+        if(line[first] == '#') continue;
+        istringstream iss(line);
+        vector<int> row;
+        int x;
+        while(iss >> x){
+            row.push_back(x);
         }
-        else{
-            if(N==-1){
-                perror("N was not parsed yet but adjaceny row is parsed");
-                return 1;
-            }
-            istringstream iss(line);
-            int x;
-            int row = temp -1;
-            int col = temp;
-            while(iss >> x){
-                costs[row][col]=x;
-                costs[col][row]=x;
-                col++;
-            }
-            temp++;
+        if(row.empty()){
+            perror("invalid row format in config file");
+            return 1;
+        }
+        rows.push_back(row);
+    }
+    fin.close();
+    N = rows.size() + 1;
+    costs.assign(N,vector<int>(N,-1));
+    for(int i = 0;i<N;i++){
+        costs[i][i] = 0;
+    }
+    for(int i=0;i<N-1;i++){
+        for(int j=i+1;j<N;j++){
+            int cost = rows[i][j-i-1];
+            costs[i][j] = cost;
+            costs[j][i] = cost;
         }
     }
 
@@ -82,7 +126,7 @@ int main(int argc, char* argv[]) {
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(5000);
 
-    if(inet_pton(AF_INET, 172.18.128.3, &serverAddr.sin_addr) != 1){
+    if(inet_pton(AF_INET, "172.18.128.3", &serverAddr.sin_addr) != 1){
         perror("inet_pton error");
         close(serverSock);
         return 1;
@@ -100,7 +144,7 @@ int main(int argc, char* argv[]) {
         return 1;
     };
 
-    vector<VirtualNode> clientSocks;
+    vector<VirtualNode> nodes;
     int i=0;
     if(N==-1){
         perror("N is not parsed");
@@ -117,12 +161,52 @@ int main(int argc, char* argv[]) {
             close(serverSock);
             return 1;
         }
-        else{
-            recv()
-            clientSocks.push_back(clientSock);
-            i++;
+
+        unsigned char body[6];
+        if(!recmsg(clientSock,body,6)){
+            cerr << "failed to rec CONNECT body";
+            close(clientSock);
+            continue;
         }
+        VirtualNode node{};
+        node.nodeID = 'A' + i;
+        node.clientSock = clientSock;
+        memcpy(&node.ipAddr.s_addr,body,4);
+        uint16_t portno;
+        memcpy(&portno,body+4,2);
+        node.udpPort = ntohs(portno);
+        nodes.push_back(node);
+
+        i++;
     }
+    for(int j = 0;j<N;j++){
+        vector<unsigned char> body;
+        unsigned char count = 0;
+        for(int k = 0;k<N;k++){
+            if(j == k || costs[j][k] != -1){
+                count++;
+            }
+        }
+        body.push_back(count);
+        for(int k = 0;k<N;k++){
+            if(k == j){
+                msgtuple(body,nodes[k],0);
+            }
+            else if(costs[j][k] != -1){
+                msgtuple(body,nodes[k],costs[j][k]);
+            }
+        }
+        if(!sendcompletemsg(nodes[j].clientSock,body.data(),body.size())){
+            cerr << "Failure in sending link-state msg to node " << nodes[j].nodeID;
+            continue;
+        }
+
+    }
+
+    for(int j=0;j<nodes.size();j++){
+        close(nodes[j].clientSock);
+    }
+    close(serverSock);
     
     return 0;
 }
