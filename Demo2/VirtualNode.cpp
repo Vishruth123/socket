@@ -7,6 +7,11 @@
 #include <unistd.h>
 using namespace std;
 
+struct Neighbour {
+    char id; sockaddr_in address;
+    int cost;
+};
+
 bool sendAll(int socketFD, char* buffer, int length) {
     int sent = 0;
     while (sent < length) {
@@ -15,6 +20,23 @@ bool sendAll(int socketFD, char* buffer, int length) {
         sent += result;
     }
     return true;
+}
+
+void printGraph(int graph[26][26], bool known[26]) {
+    cout << "Graph at this point in time: \n";
+    for (int i = 0; i < 26; i++) {
+        if (! known[i]) continue;
+        cout << char ('A' + i) << ": ";
+        bool first = true;
+        for (int j = 0; j < 26; j++) {
+            if ( i != j && graph [i][j] > 0) {
+                if (! first) cout << ", ";
+                cout << char('A' + j) << "=" << graph[i][j];
+                first = false;
+            }
+        }
+        cout << "\n";
+    }
 }
 
 bool receiveBytes(int socketFD, char* buffer, int length) {
@@ -27,37 +49,58 @@ bool receiveBytes(int socketFD, char* buffer, int length) {
     return true;
 }
 
-bool handleLinkStateMessage(int tcpSocket) {
-    char header[2];
-    if (!receiveBytes(tcpSocket, header, 2) || header[0] != 2)
+bool handleLinkStateMessage(int tcpSocket, char & myID, Neighbour neighbours[], int & neighbourCount) {
+    char countByte;
+    if (!receiveBytes(tcpSocket, & countByte, 1))
         return false;
 
-    int tupleCount = (unsigned char)header[1];
-    if (tupleCount > 26) return false;
+    int tupleCount = (unsigned char)countByte;
+    if (tupleCount < 1 || tupleCount > 26) return false;
 
-    char nodeIDs[26];
-    int costs[26];
+    Neighbour newNeighbours[26];
+    int newCount = 0;
+    char newID = '?';
 
     for (int i = 0; i < tupleCount; i++) {
         char tuple[11];
         if (!receiveBytes(tcpSocket, tuple, 11)) return false;
 
-        nodeIDs[i] = tuple[0];
+        if(tuple[0] < 'A' || tuple[0] > 'Z') return false;
 
         unsigned int networkCost;
         memcpy(&networkCost, tuple + 7, 4);
-        costs[i] = ntohl(networkCost);
+        int cost = ntohl(networkCost);
+
+        if (cost == 0) {
+            if (newID != '?') return false;
+            newID = tuple[0];
+        }
+        else {
+            newNeighbours[newCount].id = tuple[0];
+            newNeighbours[newCount].address = {};
+            newNeighbours[newCount].address.sin_family = AF_INET;
+
+            memcpy(&newNeighbours[newCount].address.sin_addr, tuple + 1, 4);
+            memcpy(&newNeighbours[newCount].address.sin_port, tuple + 5, 2);
+
+            newNeighbours[newCount].cost = cost;
+            newCount++;
+        }
     }
 
-    char myNodeID = '?';
-    for (int i = 0; i < tupleCount; i++)
-        if (costs[i] == 0) myNodeID = nodeIDs[i];
+    if (newID < 'A' || newID > 'Z') {
+        return false;
+    }
+    myID = newID;
+    neighbourCount = newCount;
 
-    cout << "My node: " << myNodeID << "\nNeighbourhood: ";
+    for (int i = 0; i < newCount; i++)
+        neighbours[i] = newNeighbours[i];
 
-    for (int i = 0; i < tupleCount; i++) {
-        cout << nodeIDs[i] << "=" << costs[i];
-        if (i < tupleCount - 1) cout << ", ";
+    cout << "My node: " << myID << "\nNeighbourhood: " << myID << "=0";
+
+    for (int i = 0; i < neighbourCount; i++) {
+        cout << ", " << neighbours[i].id << "=" << neighbours[i].cost;
     }
 
     cout << endl;
@@ -87,18 +130,21 @@ int main(int argc, char* argv[]) {
     if (connect(tcpSocket, (sockaddr*)&oracleAddress, sizeof(oracleAddress)) < 0)
         return 1;
 
-    char message[7];
-    message[0] = 1;
-    inet_pton(AF_INET, argv[2], message + 1);
+    char message[6];
+    inet_pton(AF_INET, argv[2], message);
 
     unsigned short networkPort = htons(udpPort);
-    memcpy(message + 5, &networkPort, 2);
+    memcpy(message + 4, &networkPort, 2);
 
-    if (!sendAll(tcpSocket, message, 7)) return 1;
+    if (!sendAll(tcpSocket, message, 6)) return 1;
 
     cout << "Connected to ON. Waiting for LINK-STATE...\n";
 
-    while (handleLinkStateMessage(tcpSocket)) {}
+    char myID = '?';
+    Neighbour neighbours[26];
+    int neighbourCount = 0;
+
+    while (handleLinkStateMessage(tcpSocket, myID, neighbours, neighbourCount)) {}
 
     close(tcpSocket);
     close(udpSocket);
