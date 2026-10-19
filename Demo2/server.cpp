@@ -60,23 +60,10 @@ void msgtuple(vector<unsigned char>& body,const VirtualNode& node,int cost){
     body.push_back((tcost >> 16) & 0xFF);
     body.push_back((tcost >> 8) & 0xFF);
     body.push_back(tcost & 0xFF);
-    
 }
 
-int main(int argc, char* argv[]) {
-    if(argc!=2){
-        cout<< "Usage is ./ON <configfile>\n";
-        return 1;
-    }
-
-    // Parsing the config file
-    // Need to add more validating the config file rules
-
-    int N = -1;
-    vector<vector<int>> costs;
-    int temp = 1;
-
-    ifstream fin(argv[1]);
+bool readconfig(const string& filename, vector<vector<int>>& result){
+    ifstream fin(filename);
     if(!fin.is_open()){
         perror("config file didnt open");
         return 1;
@@ -97,13 +84,25 @@ int main(int argc, char* argv[]) {
         }
         if(row.empty()){
             perror("invalid row format in config file");
-            return 1;
+            return false;
         }
         rows.push_back(row);
     }
     fin.close();
-    N = rows.size() + 1;
-    costs.assign(N,vector<int>(N,-1));
+    int N = rows.size() + 1;
+    for(int i=0;i<N-1;i++){
+        if(rows[i].size()!= N-i-1){
+            perror("wrong number of values in this row");
+            return false;
+        }
+        for(int cost:rows[i]){
+            if(cost!=-1 && cost<=0){
+                perror("invalid cost value");
+                return false;
+            }
+        }
+    }
+    vector<vector<int>> costs(N,vector<int>(N,-1));
     for(int i = 0;i<N;i++){
         costs[i][i] = 0;
     }
@@ -114,6 +113,44 @@ int main(int argc, char* argv[]) {
             costs[j][i] = cost;
         }
     }
+    result = costs;
+    return true;
+}
+
+bool sendLinkstate(int nodeID, const vector<VirtualNode>& nodes,const vector<vector<int>>& costs){
+    int N = costs.size();
+    vector<unsigned char> body;
+    unsigned char count = 0;
+    for(int k=0;k<N;k++){
+        if(k==nodeID || costs[nodeID][k] != -1) count++;
+    }
+    body.push_back(count);
+    for(int k=0;k<N;k++){
+        if(k==nodeID){
+            msgtuple(body,nodes[k],0);
+        }
+        else if(costs[nodeID][k] != -1){
+            msgtuple(body,nodes[k],costs[nodeID][k]);
+        }
+    }
+    return sendcompletemsg(nodes[nodeID].clientSock,body.data(),body.size());
+}
+
+int main(int argc, char* argv[]) {
+    if(argc!=2){
+        cout<< "Usage is ./ON <configfile>\n";
+        return 1;
+    }
+
+    // Parsing the config file
+    // Need to add more validating the config file rules
+    string configfile = argv[1];
+    vector<vector<int>> costs;
+    if(!readconfig(configfile,costs)){
+        return 1;
+    }
+    int N = costs.size();
+    
 
     int serverSock = socket(AF_INET, SOCK_STREAM, 0);
     if(serverSock < 0){
@@ -146,10 +183,6 @@ int main(int argc, char* argv[]) {
 
     vector<VirtualNode> nodes;
     int i=0;
-    if(N==-1){
-        perror("N is not parsed");
-        return 1;
-    }
     while(i<N){
         sockaddr_in clientAddr{};
         socklen_t clientLen = sizeof(clientAddr);
@@ -179,34 +212,29 @@ int main(int argc, char* argv[]) {
 
         i++;
     }
-    for(int j = 0;j<N;j++){
-        vector<unsigned char> body;
-        unsigned char count = 0;
-        for(int k = 0;k<N;k++){
-            if(j == k || costs[j][k] != -1){
-                count++;
-            }
+    for(int j=0;j<N;j++){
+        if(!sendLinkstate(j,nodes,costs)){
+            cerr << "Failure in sending initial link-state to nodes";
+            return 1;
         }
-        body.push_back(count);
-        for(int k = 0;k<N;k++){
-            if(k == j){
-                msgtuple(body,nodes[k],0);
-            }
-            else if(costs[j][k] != -1){
-                msgtuple(body,nodes[k],costs[j][k]);
-            }
-        }
-        if(!sendcompletemsg(nodes[j].clientSock,body.data(),body.size())){
-            cerr << "Failure in sending link-state msg to node " << nodes[j].nodeID;
+    }
+
+    while(true){
+        sleep(30);
+
+        vector<vector<int>> newcosts;
+        if(!readconfig(configfile,newcosts)){
+            cerr << "config file re parsing failed";
             continue;
         }
-
+        if(newcosts == costs) continue;
+        costs = newcosts;
+        for(int j=0;j<N;j++){
+            if(!sendLinkstate(j,nodes,costs)){
+                perror("failure in update of node");
+            }
+        }
     }
-
-    for(int j=0;j<nodes.size();j++){
-        close(nodes[j].clientSock);
-    }
-    close(serverSock);
     
     return 0;
 }
