@@ -282,8 +282,32 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    while (handleLinkStateMessage(tcpSocket, myID, neighbours, neighbourCount, graph, known)) {
-        if (!sendOwnLSP(udpSocket, myID, neighbours, neighbourCount, sequenceNumber)) break;
+    while (true) {
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(tcpSocket, &readSet);
+        FD_SET(udpSocket, &readSet);
+
+        int maxSocket = (tcpSocket > udpSocket) ? tcpSocket : udpSocket;
+
+        int ready = select(maxSocket + 1, &readSet, nullptr, nullptr, nullptr);
+
+        if (ready < 0) {
+            perror("select");
+            break;
+        }
+
+        if (FD_ISSET(tcpSocket, &readSet)) {
+            if (!handleLinkStateMessage(tcpSocket, myID, neighbours, neighbourCount, graph, known))
+            break;
+            if (!sendOwnLSP(udpSocket, myID, neighbours, neighbourCount, sequenceNumber)) break;
+            lastSequence[nodeIndex(myID)] = sequenceNumber;
+        }
+
+        if (FD_ISSET(udpSocket, &readSet)) {
+            handleReceivedLSP(udpSocket, myID, graph, known, lastSequence);
+        }
+
     }
 
     close(tcpSocket);
