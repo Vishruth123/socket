@@ -165,7 +165,7 @@ bool sendOwnLSP(int udpSocket, char myID, const Neighbour neighbours[], int neig
 
 }
 
-void handleReceivedLSP(int udpSocket, char myID, int graph[26][26], bool known[26], unsigned int lastSequence[26]) {
+void handleReceivedLSP(int udpSocket, char myID, const Neighbour neighbours[], int neighbourCount, int graph[26][26], bool known[26], unsigned int lastSequence[26]) {
     char message[6 + 5 * 26];
     sockaddr_in sender{};
     socklen_t senderLength = sizeof(sender);
@@ -213,6 +213,13 @@ void handleReceivedLSP(int udpSocket, char myID, int graph[26][26], bool known[2
 
     updateGraph(origin, links, count, graph, known);
     lastSequence[index] = sequence;
+
+    for (int i = 0; i < neighbourCount; i++) {
+        if (neighbours[i].address.sin_addr.s_addr == sender.sin_addr.s_addr && neighbours[i].address.sin_port == sender.sin_port) continue;
+        int sent = sendto(udpSocket, message, length, 0, (sockaddr*)&neighbours[i].address, sizeof(neighbours[i].address));
+
+        if (sent != length) perror("Forward LSP");
+    }
 
     cout << "Received new LSP from: " << origin << ", sequence: " << sequence << endl;
     printGraph(graph, known);
@@ -305,7 +312,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (FD_ISSET(udpSocket, &readSet)) {
-            handleReceivedLSP(udpSocket, myID, graph, known, lastSequence);
+            handleReceivedLSP(udpSocket, myID, neighbours, neighbourCount, graph, known, lastSequence);
         }
 
     }
