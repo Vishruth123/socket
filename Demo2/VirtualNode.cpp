@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <climits>
 #include <sys/select.h>
+#include <ctime>
 using namespace std;
 
 struct Neighbour {
@@ -289,6 +290,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    time_t lastPeriodic = time(nullptr);
+
     while (true) {
         fd_set readSet;
         FD_ZERO(&readSet);
@@ -297,7 +300,19 @@ int main(int argc, char* argv[]) {
 
         int maxSocket = (tcpSocket > udpSocket) ? tcpSocket : udpSocket;
 
-        int ready = select(maxSocket + 1, &readSet, nullptr, nullptr, nullptr);
+        timeval timeout{};
+        timeval* timeoutPointer = nullptr;
+
+        if (myID != '?') {
+            int elapsed = (int)(time (nullptr) - lastPeriodic);
+            int remaining = 15 - elapsed;
+            if (remaining < 0) remaining = 0;
+
+            timeout.tv_sec = remaining;
+            timeoutPointer = &timeout;
+        }
+
+        int ready = select(maxSocket + 1, &readSet, nullptr, nullptr, timeoutPointer);
 
         if (ready < 0) {
             perror("select");
@@ -309,10 +324,19 @@ int main(int argc, char* argv[]) {
             break;
             if (!sendOwnLSP(udpSocket, myID, neighbours, neighbourCount, sequenceNumber)) break;
             lastSequence[nodeIndex(myID)] = sequenceNumber;
+            lastPeriodic = time(nullptr);
         }
 
         if (FD_ISSET(udpSocket, &readSet)) {
             handleReceivedLSP(udpSocket, myID, neighbours, neighbourCount, graph, known, lastSequence);
+        }
+
+        if (myID != '?' && time(nullptr) - lastPeriodic >= 15) {
+            if (!sendOwnLSP(udpSocket, myID, neighbours, neighbourCount, sequenceNumber)) break;
+
+            lastSequence[nodeIndex(myID)] = sequenceNumber;
+            printGraph(graph, known);
+            lastPeriodic = time(nullptr);
         }
 
     }
