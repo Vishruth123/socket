@@ -112,7 +112,16 @@ int main(int argc, char* argv[]) {
 
     int udpPort = atoi(argv[3]);
 
+    if (udpPort < 1 || udpPort > 65535) {
+        cerr << "Invalid UDP Port\n"; return 1;
+    }
+
     int udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
+
+    if (udpSocket < 0) {
+        perror("UDP socket"); return 1;
+    }
+
     sockaddr_in myUDPAddress{};
     myUDPAddress.sin_family = AF_INET;
     myUDPAddress.sin_port = htons(udpPort);
@@ -122,6 +131,11 @@ int main(int argc, char* argv[]) {
         return 1;
 
     int tcpSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (tcpSocket < 0) {
+        perror("TCP socket"); return 1;
+    }
+
     sockaddr_in oracleAddress{};
     oracleAddress.sin_family = AF_INET;
     oracleAddress.sin_port = htons(5000);
