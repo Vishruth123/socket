@@ -66,7 +66,7 @@ bool receiveBytes(int socketFD, char* buffer, int length) {
     return true;
 }
 
-bool handleLinkStateMessage(int tcpSocket, char & myID, Neighbour neighbours[], int & neighbourCount) {
+bool handleLinkStateMessage(int tcpSocket, char & myID, Neighbour neighbours[], int & neighbourCount, int graph[26][26], bool known[26]) {
     char countByte;
     if (!receiveBytes(tcpSocket, & countByte, 1))
         return false;
@@ -114,6 +114,8 @@ bool handleLinkStateMessage(int tcpSocket, char & myID, Neighbour neighbours[], 
     for (int i = 0; i < newCount; i++)
         neighbours[i] = newNeighbours[i];
 
+    updateGraph(myID, neighbours, neighbourCount, graph, known);
+
     cout << "My node: " << myID << "\nNeighbourhood: " << myID << "=0";
 
     for (int i = 0; i < neighbourCount; i++) {
@@ -121,7 +123,43 @@ bool handleLinkStateMessage(int tcpSocket, char & myID, Neighbour neighbours[], 
     }
 
     cout << endl;
+    printGraph(graph, known);
     return true;
+}
+
+bool sendOwnLSP(int udpSocket, char myID, const Neighbour neighbours[], int neighbourCount, unsigned int& sequenceNumber) {
+    char message[6 + 5 * 26]; int position = 0;
+
+    sequenceNumber++; // increment every time called
+
+    message[position] = myID;
+    position++;
+
+    unsigned int networkSequence = htonl(sequenceNumber);
+    memcpy(message + position, & networkSequence, 4);
+    position += 4;
+
+    message[position++] = (unsigned char)neighbourCount; 
+
+    for (int i = 0; i < neighbourCount; i++) {
+        message[position] = neighbours [i].id;
+
+        unsigned int networkCost = htonl(neighbours[i].cost);
+        memcpy(message + position, & networkCost, 4); position +=4;
+    }
+
+    for (int i = 0; i < neighbourCount; i++) {
+        int result = sendto(udpSocket, message, position, 0, (sockaddr*)& neighbours[i].address, sizeof(neighbours[i].address));
+
+        if (result != position) {
+            perror("sendto"); return false;
+        }
+    }
+
+    cout << "Sent LSP from: " << myID << ", sequence: " << sequenceNumber << endl;
+
+    return true;
+
 }
 
 int main(int argc, char* argv[]) {
@@ -175,7 +213,18 @@ int main(int argc, char* argv[]) {
     Neighbour neighbours[26];
     int neighbourCount = 0;
 
-    while (handleLinkStateMessage(tcpSocket, myID, neighbours, neighbourCount)) {}
+    unsigned int sequenceNumber = 0;
+
+    int graph[26][26];
+    bool known[26] = {};
+
+    for (int i = 0; i < 26; i++) {
+        for (int j = 0; j < 26; j++) {
+            graph[i][j] = (i == j) ? 0 : -1;
+        }
+    }
+
+    while (handleLinkStateMessage(tcpSocket, myID, neighbours, neighbourCount, graph, known)) {}
 
     close(tcpSocket);
     close(udpSocket);
