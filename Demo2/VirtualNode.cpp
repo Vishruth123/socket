@@ -22,6 +22,23 @@ bool sendAll(int socketFD, char* buffer, int length) {
     return true;
 }
 
+int nodeIndex(char id){ return id - 'A';}
+
+void updateGraph(char id, const Neighbour neighbours[], int count, int graph[26][26], bool known[26]){
+    int row = nodeIndex(id);
+    for (int i = 0; i < 26; i++) {
+        graph[row][i] = -1;
+        graph[i][row] = -1;
+    }
+    graph[row][row] = 0;
+    for (int i = 0; i < count; i++) {
+        int neighbour = nodeIndex(neighbours[i].id);
+        graph[row][neighbour] = neighbours[i].cost;
+        graph[neighbour][row] = neighbours[i].cost;
+    }
+    known[row] = true;
+}
+
 void printGraph(int graph[26][26], bool known[26]) {
     cout << "Graph at this point in time: \n";
     for (int i = 0; i < 26; i++) {
