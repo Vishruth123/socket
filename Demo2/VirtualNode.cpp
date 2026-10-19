@@ -91,6 +91,8 @@ bool handleLinkStateMessage(int tcpSocket, char & myID, Neighbour neighbours[], 
         memcpy(&networkCost, tuple + 7, 4);
         int cost = ntohl(networkCost);
 
+        if (cost > INT_MAX) return false;
+
         if (cost == 0) {
             if (newID != '?') return false;
             newID = tuple[0];
@@ -103,7 +105,7 @@ bool handleLinkStateMessage(int tcpSocket, char & myID, Neighbour neighbours[], 
             memcpy(&newNeighbours[newCount].address.sin_addr, tuple + 1, 4);
             memcpy(&newNeighbours[newCount].address.sin_port, tuple + 5, 2);
 
-            newNeighbours[newCount].cost = cost;
+            newNeighbours[newCount].cost = (int)cost;
             newCount++;
         }
     }
