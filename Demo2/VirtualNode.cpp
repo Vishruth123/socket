@@ -5,6 +5,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <climits>
+#include <sys/select.h>
 using namespace std;
 
 struct Neighbour {
@@ -163,6 +165,60 @@ bool sendOwnLSP(int udpSocket, char myID, const Neighbour neighbours[], int neig
 
 }
 
+void handleReceivedLSP(int udpSocket, char myID, int graph[26][26], bool known[26], unsigned int lastSequence[26]) {
+    char message[6 + 5 * 26];
+    sockaddr_in sender{};
+    socklen_t senderLength = sizeof(sender);
+
+    int length = recvfrom(udpSocket, message, size(message), 0, (sockaddr*)&sender, &senderLength);
+
+    if (length < 6) return;
+
+    char origin = message[0];
+    if (origin < 'A' || origin > 'Z' || origin == myID) return;
+
+    unsigned int networkSequence;
+    memcpy(&networkSequence, message + 1, 4);
+    unsigned int sequence = ntohl(networkSequence);
+
+    int count = (unsigned char)message[5];
+
+    if (sequence == 0 || count > 25 || length != 6 + count * 5) return;
+
+    int index = nodeIndex(origin);
+    if (sequence <= lastSequence[index]) return;
+
+    Neighbour links[26];
+    bool seen[26] = {};
+    int position = 6;
+
+    for (int i = 0; i < count; i++) {
+        char id = message[position++];
+        unsigned int networkCost;
+
+        if (id < 'A' || id > 'Z' || id == origin) return;
+
+        int neighbourIndex = nodeIndex(id);
+        if (seen[neighbourIndex]) return;
+        seen[neighbourIndex] = true;
+
+        memcpy(&networkCost, message + position, 4);
+        position += 4;
+
+        unsigned int cost = ntohl(networkCost);
+        if (cost == 0 || cost > INT_MAX) return;
+
+        links[i].id = id; links[i].cost = (int)cost;
+    }
+
+    updateGraph(origin, links, count, graph, known);
+    lastSequence[index] = sequence;
+
+    cout << "Received new LSP from: " << origin << ", sequence: " << sequence << endl;
+    printGraph(graph, known);
+
+}
+
 int main(int argc, char* argv[]) {
     if (argc != 4) return 1;
 
@@ -215,6 +271,7 @@ int main(int argc, char* argv[]) {
     int neighbourCount = 0;
 
     unsigned int sequenceNumber = 0;
+    unsigned int lastSequence[26] = {};
 
     int graph[26][26];
     bool known[26] = {};
